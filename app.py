@@ -102,3 +102,18 @@ def add_course():
 
 if __name__ == '__main__':
     app.run(debug=True)
+@app.route('/submit_request', methods=['POST'])
+def submit_request():
+    if not supabase:
+        return "Supabase not configured", 500
+    student_name = request.form.get('student_name')
+    phone = request.form.get('phone')
+    requested_topic = request.form.get('requested_topic')
+    
+    supabase.table('course_requests').insert({
+        'student_name': student_name,
+        'phone': phone,
+        'requested_topic': requested_topic
+    }).execute()
+    
+    return redirect(url_for('index'))
