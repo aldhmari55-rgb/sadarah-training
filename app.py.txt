@@ -1,0 +1,94 @@
+import os
+from flask import Flask, render_template, request, redirect, url_for, send_from_directory, flash
+from werkzeug.utils import secure_filename
+
+app = Flask(__name__)
+app.secret_key = "sadarah_training_secure_key_2026"
+
+# „Ã·œ«  «· Œ“Ì‰ «·”Õ«»Ì/«·„Õ·Ì
+UPLOAD_FOLDER_COURSES = 'static/uploads/courses'
+UPLOAD_FOLDER_ASSIGNMENTS = 'static/uploads/assignments'
+ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'mp4', 'pdf', 'doc', 'docx'}
+
+app.config['UPLOAD_FOLDER_COURSES'] = UPLOAD_FOLDER_COURSES
+app.config['UPLOAD_FOLDER_ASSIGNMENTS'] = UPLOAD_FOLDER_ASSIGNMENTS
+
+os.makedirs(UPLOAD_FOLDER_COURSES, exist_ok=True)
+os.makedirs(UPLOAD_FOLDER_ASSIGNMENTS, exist_ok=True)
+
+# ﬁÊ«⁄œ »Ì«‰«  „ƒﬁ … (Ì„ﬂ‰ —»ÿÂ« »ﬁ«⁄œ… »Ì«‰«  ·«Õﬁ«)
+courses_db = []
+registrations_db = []
+assignments_db = []
+
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+@app.route('/')
+def index():
+    return render_template('index.html', courses=courses_db)
+
+@app.route('/course/<int:course_id>', methods=['GET', 'POST'])
+def course_details(course_id):
+    course = next((c for c in courses_db if c['id'] == course_id), None)
+    if not course:
+        return "«·œÊ—… €Ì— „ÊÃÊœ…", 404
+    
+    if request.method == 'POST':
+        form_type = request.form.get('form_type')
+        if form_type == 'register':
+            student_name = request.form.get('student_name')
+            student_phone = request.form.get('student_phone')
+            registrations_db.append({'course_id': course_id, 'name': student_name, 'phone': student_phone})
+            flash(' „ ≈—”«· ÿ·»  ”ÃÌ·ﬂ »‰Ã«Õ! ”‰ Ê«’· „⁄ﬂ ⁄»— Ê« ”«».', 'success')
+            
+        elif form_type == 'assignment':
+            student_name = request.form.get('student_name')
+            file = request.files.get('assignment_file')
+            if file and allowed_file(file.filename):
+                filename = secure_filename(file.filename)
+                file.save(os.path.join(app.config['UPLOAD_FOLDER_ASSIGNMENTS'], filename))
+                assignments_db.append({'course_id': course_id, 'name': student_name, 'file': filename})
+                flash(' „ —›⁄ «·Ê«Ã» Ê≈—”«·Â ··„œ—» »‰Ã«Õ!', 'success')
+                
+        return redirect(url_for('course_details', course_id=course_id))
+
+    return render_template('course_details.html', course=course)
+
+# ·ÊÕ… «· Õﬂ„ «·≈œ«—Ì… («· Õﬂ„ «·ﬂ«„· 100%)
+@app.route('/admin-sadarah-panel')
+def admin_panel():
+    return render_template('admin.html', courses=courses_db, registrations=registrations_db, assignments=assignments_db)
+
+@app.route('/admin/add_course', methods=['POST'])
+def add_course():
+    title = request.form.get('title')
+    description = request.form.get('description')
+    price = request.form.get('price')
+    
+    media_file = request.files.get('media_file')
+    filename = ""
+    if media_file and allowed_file(media_file.filename):
+        filename = secure_filename(media_file.filename)
+        media_file.save(os.path.join(app.config['UPLOAD_FOLDER_COURSES'], filename))
+    
+    new_course = {
+        'id': len(courses_db) + 1,
+        'title': title,
+        'description': description,
+        'price': price,
+        'media': filename
+    }
+    courses_db.append(new_course)
+    flash(' „ ≈÷«›… Ê‰‘— «·œÊ—… »‰Ã«Õ!', 'success')
+    return redirect(url_for('admin_panel'))
+
+@app.route('/admin/delete_course/<int:course_id>')
+def delete_course(course_id):
+    global courses_db
+    courses_db = [c for c in courses_db if c['id'] != course_id]
+    flash(' „ Õ–› «·œÊ—… »‰Ã«Õ.', 'info')
+    return redirect(url_for('admin_panel'))
+
+if __name__ == '__main__':
+    app.run(debug=True)
