@@ -1,121 +1,104 @@
 import os
-from flask import Flask, render_template, request, redirect, url_for, flash
+from flask import Flask, render_template, request, redirect, url_for, jsonify
 from supabase import create_client, Client
-import cloudinary
-import cloudinary.uploader
 
 app = Flask(__name__)
-app.secret_key = "sadarah_training_secure_production_key"
 
-# إعدادات اتصال Supabase (تُؤخذ من متغيرات البيئة في Vercel أو تُكتب هنا مؤقتاً)
-SUPABASE_URL = os.environ.get('SUPABASE_URL', 'ضع_رابط_Supabase_هنا')
-SUPABASE_KEY = os.environ.get('SUPABASE_KEY', 'ضع_مفتاح_anon_key_هنا')
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+# Supabase Credentials
+SUPABASE_URL = os.environ.get("SUPABASE_URL")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 
-# إعدادات التخزين السحابي Cloudinary للوسائط والواجبات
-cloudinary.config(
-  cloud_name = os.environ.get('CLOUDINARY_CLOUD_NAME', 'ضع_cloud_name_هنا'),
-  api_key = os.environ.get('CLOUDINARY_API_KEY', 'ضع_api_key_هنا'),
-  api_secret = os.environ.get('CLOUDINARY_API_SECRET', 'ضع_api_secret_هنا')
-)
+supabase: Client = None
+if SUPABASE_URL and SUPABASE_KEY:
+    supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 @app.route('/')
 def index():
-    # جلب الدورات من جدول courses في Supabase
-    try:
+    courses = []
+    if supabase:
         response = supabase.table('courses').select('*').execute()
         courses = response.data
-    except Exception as e:
-        courses = []
     return render_template('index.html', courses=courses)
 
-@app.route('/course/<int:course_id>', methods=['GET', 'POST'])
+@app.route('/course/<int:course_id>')
 def course_details(course_id):
-    # جلب تفاصيل الدورة المحددة
-    try:
-        course_res = supabase.table('courses').select('*').eq('id', course_id).execute()
-        course = course_res.data[0] if course_res.data else None
-    except:
-        course = None
-
-    if not course:
+    if not supabase:
+        return "Supabase not configured", 500
+    course_res = supabase.table('courses').select('*').eq('id', course_id).execute()
+    if not course_res.data:
         return "الدورة غير موجودة", 404
+    course = course_res.data[0]
     
-    if request.method == 'POST':
-        form_type = request.form.get('form_type')
-        
-        if form_type == 'register':
-            student_name = request.form.get('student_name')
-            student_phone = request.form.get('student_phone')
-            # حفظ طلب التسجيل في جدول registrations في Supabase
-            supabase.table('registrations').insert({
-                'course_id': course_id,
-                'student_name': student_name,
-                'student_phone': student_phone
-            }).execute()
-            flash('تم إرسال طلب تسجيلك بنجاح! سنتواصل معك عبر واتساب.', 'success')
-            
-        elif form_type == 'assignment':
-            student_name = request.form.get('student_name')
-            file = request.files.get('assignment_file')
-            if file:
-                # رفع واجب الطالب (PDF أو Word) إلى Cloudinary والحصول على رابطه السحابي
-                upload_res = cloudinary.uploader.upload(file, resource_type="auto")
-                file_url = upload_res.get('secure_url')
-                
-                # حفظ بيانات الواجب في جدول assignments في Supabase
-                supabase.table('assignments').insert({
-                    'course_id': course_id,
-                    'student_name': student_name,
-                    'file_url': file_url
-                }).execute()
-                flash('تم رفع الواجب وإرساله للمدرب بنجاح!', 'success')
-                
-        return redirect(url_for('course_details', course_id=course_id))
+    registrations_res = supabase.table('registrations').select('*').eq('course_id', course_id).execute()
+    assignments_res = supabase.table('assignments').select('*').eq('course_id', course_id).execute()
+    
+    return render_template('course_details.html', 
+                           course=course, 
+                           registrations=registrations_res.data, 
+                           assignments=assignments_res.data)
 
-    return render_template('course_details.html', course=course)
+@app.route('/register', methods=['POST'])
+def register():
+    if not supabase:
+        return "Supabase not configured", 500
+    course_id = request.form.get('course_id')
+    student_name = request.form.get('student_name')
+    phone = request.form.get('phone')
+    
+    supabase.table('registrations').insert({
+        'course_id': course_id,
+        'student_name': student_name,
+        'phone': phone
+    }).execute()
+    
+    return redirect(url_for('course_details', course_id=course_id))
 
-# لوحة التحكم الإدارية (التحكم الكامل 100%)
-@app.route('/admin-sadarah-panel')
-def admin_panel():
-    try:
+@app.route('/submit_assignment', methods=['POST'])
+def submit_assignment():
+    if not supabase:
+        return "Supabase not configured", 500
+    course_id = request.form.get('course_id')
+    student_name = request.form.get('student_name')
+    file_url = request.form.get('file_url')  # رابط الملف أو الواجب
+    
+    supabase.table('assignments').insert({
+        'course_id': course_id,
+        'student_name': student_name,
+        'file_url': file_url
+    }).execute()
+    
+    return redirect(url_for('course_details', course_id=course_id))
+
+@app.route('/admin')
+def admin():
+    courses = []
+    registrations = []
+    assignments = []
+    if supabase:
         courses = supabase.table('courses').select('*').execute().data
         registrations = supabase.table('registrations').select('*').execute().data
         assignments = supabase.table('assignments').select('*').execute().data
-    except:
-        courses, registrations, assignments = [], [], []
-
     return render_template('admin.html', courses=courses, registrations=registrations, assignments=assignments)
 
 @app.route('/admin/add_course', methods=['POST'])
 def add_course():
+    if not supabase:
+        return "Supabase not configured", 500
     title = request.form.get('title')
     description = request.form.get('description')
-    price = request.form.get('price')
+    image_url = request.form.get('image_url')
+    video_url = request.form.get('video_url')
+    pdf_url = request.form.get('pdf_url')
     
-    media_file = request.files.get('media_file')
-    media_url = ""
-    if media_file:
-        # رفع وسائط الدورة (فيديو، صورة، PDF) للسحابة
-        upload_res = cloudinary.uploader.upload(media_file, resource_type="auto")
-        media_url = upload_res.get('secure_url')
-    
-    # إدخال الدورة الجديدة في جدول courses في Supabase
     supabase.table('courses').insert({
         'title': title,
         'description': description,
-        'price': price,
-        'media_url': media_url
+        'image_url': image_url,
+        'video_url': video_url,
+        'pdf_url': pdf_url
     }).execute()
     
-    flash('تم إضافة ونشر الدورة بنجاح!', 'success')
-    return redirect(url_for('admin_panel'))
-
-@app.route('/admin/delete_course/<int:course_id>')
-def delete_course(course_id):
-    supabase.table('courses').delete().eq('id', course_id).execute()
-    flash('تم حذف الدورة بنجاح.', 'info')
-    return redirect(url_for('admin_panel'))
+    return redirect(url_for('admin'))
 
 if __name__ == '__main__':
     app.run(debug=True)
