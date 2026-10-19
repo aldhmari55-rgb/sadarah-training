@@ -1,0 +1,4 @@
+Flask==3.0.2
+Werkzeug==3.0.1
+supabase==2.3.0
+cloudinary==1.38.0
